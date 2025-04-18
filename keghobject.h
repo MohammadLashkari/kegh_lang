@@ -37,6 +37,7 @@ typedef union kegh_object_data {
 typedef struct kegh_object {
   kegh_object_kind_t kind;
   kegh_object_data_t data;
+  int refcount;
 
 } kegh_object_t;
 
@@ -50,5 +51,9 @@ kegh_object_t *new_kegh_array(size_t size);
 bool kegh_array_set(kegh_object_t *kegh_obj, size_t index, kegh_object_t *v);
 kegh_object_t *kegh_array_get(kegh_object_t *obj, size_t index);
 
-int kegh_length(kegh_object_t *obj);
+size_t kegh_length(kegh_object_t *obj);
 kegh_object_t *kegh_add(kegh_object_t *x, kegh_object_t *y);
+
+void refcount_inc(kegh_object_t *obj);
+void refcount_dec(kegh_object_t *obj);
+void refcount_free(kegh_object_t *obj);

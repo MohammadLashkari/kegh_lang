@@ -2,8 +2,67 @@
 #include <stdlib.h>
 #include <string.h>
 
-kegh_object_t *new_kegh_integer(int v) {
+void refcount_free(kegh_object_t *obj) {
+  if (obj == NULL) {
+    return;
+  }
+  switch (obj->kind) {
+  case INTEGER:
+  case FLOAT:
+    break;
+
+  case STRING:
+    free(obj->data.v_string);
+    break;
+
+  case VECTOR3:
+    refcount_dec(obj->data.v_vector3.x);
+    refcount_dec(obj->data.v_vector3.y);
+    refcount_dec(obj->data.v_vector3.z);
+    break;
+
+  case ARRAY:
+    for (size_t i = 0; i < obj->data.v_array.size; i++) {
+      refcount_dec(obj->data.v_array.elems[i]);
+    }
+    free(obj->data.v_array.elems);
+    break;
+
+  default:
+    return;
+  }
+
+  free(obj);
+}
+
+void refcount_dec(kegh_object_t *obj) {
+  if (obj == NULL) {
+    return;
+  }
+  obj->refcount--;
+  if (obj->refcount == 0) {
+    refcount_free(obj);
+  }
+}
+
+void refcount_inc(kegh_object_t *obj) {
+  if (obj == NULL) {
+    return;
+  }
+  obj->refcount++;
+}
+
+kegh_object_t *_new_kegh_object() {
   kegh_object_t *obj = malloc(sizeof(kegh_object_t));
+  if (obj == NULL) {
+    return NULL;
+  }
+  obj->refcount = 1;
+  return obj;
+}
+
+kegh_object_t *new_kegh_integer(int v) {
+  kegh_object_t *obj = _new_kegh_object();
   if (obj == NULL) {
     return NULL;
   }
@@ -14,7 +73,7 @@ kegh_object_t *new_kegh_integer(int v) {
 }
 
 kegh_object_t *new_kegh_float(float v) {
-  kegh_object_t *obj = malloc(sizeof(kegh_object_t));
+  kegh_object_t *obj = _new_kegh_object();
   if (obj == NULL) {
     return NULL;
   }
@@ -25,7 +84,7 @@ kegh_object_t *new_kegh_float(float v) {
 }
 
 kegh_object_t *new_kegh_string(char *v) {
-  kegh_object_t *obj = malloc(sizeof(kegh_object_t));
+  kegh_object_t *obj = _new_kegh_object();
   if (obj == NULL) {
     return NULL;
   }
@@ -46,20 +105,23 @@ kegh_object_t *new_kegh_vector3(kegh_object_t *x, kegh_object_t *y,
     return NULL;
   }
 
-  kegh_object_t *obj = malloc(sizeof(kegh_object_t));
+  kegh_object_t *obj = _new_kegh_object();
   if (obj == NULL) {
     return NULL;
   }
   obj->kind = STRING;
-  obj->data.v_vector3.x = x;
-  obj->data.v_vector3.y = y;
-  obj->data.v_vector3.z = z;
+
+  refcount_inc(x);
+  refcount_inc(y);
+  refcount_inc(z);
+
+  obj->data.v_vector3 = (kegh_vector_t){.x = x, .y = y, .z = z};
 
   return obj;
 }
 
 kegh_object_t *new_kegh_array(size_t size) {
-  kegh_object_t *obj = malloc(sizeof(kegh_object_t));
+  kegh_object_t *obj = _new_kegh_object();
   if (obj == NULL) {
     return NULL;
   }
@@ -69,13 +131,9 @@ kegh_object_t *new_kegh_array(size_t size) {
     free(obj);
     return NULL;
   }
-  kegh_array_t arr = {
-      .size = size,
-      .elems = elems,
-  };
 
   obj->kind = ARRAY;
-  obj->data.v_array = arr;
+  obj->data.v_array = (kegh_array_t){.size = size, .elems = elems};
 
   return obj;
 }
@@ -90,6 +148,11 @@ bool kegh_array_set(kegh_object_t *obj, size_t index, kegh_object_t *v) {
   if (obj->data.v_array.size <= index) {
     return false;
   }
+  if (obj->data.v_array.elems[index] != NULL) {
+    refcount_dec(obj->data.v_array.elems[index]);
+  }
+
+  refcount_inc(v);
   obj->data.v_array.elems[index] = v;
 
   return true;
@@ -109,7 +172,7 @@ kegh_object_t *kegh_array_get(kegh_object_t *obj, size_t index) {
   return obj->data.v_array.elems[index];
 }
 
-int kegh_length(kegh_object_t *obj) {
+size_t kegh_length(kegh_object_t *obj) {
   if (obj == NULL) {
     return -1;
   }
@@ -158,7 +221,7 @@ kegh_object_t *kegh_add(kegh_object_t *x, kegh_object_t *y) {
   if (x->kind == STRING) {
     switch (y->kind) {
     case STRING: {
-      size_t len = strlen(x->data.v_string) + strlen(y->data.v_string) + 1;
+      size_t len = kegh_length(x) + kegh_length(y) + 1;
       char *tmp = calloc(len, sizeof(char));
       if (tmp == NULL) {
         return NULL;
@@ -167,6 +230,7 @@ kegh_object_t *kegh_add(kegh_object_t *x, kegh_object_t *y) {
       strcat(tmp, y->data.v_string);
       kegh_object_t *new_str = new_kegh_string(tmp);
       free(tmp);
+
       return new_str;
     }
     default:
@@ -189,14 +253,14 @@ kegh_object_t *kegh_add(kegh_object_t *x, kegh_object_t *y) {
   if (x->kind == ARRAY) {
     switch (y->kind) {
     case ARRAY: {
-      size_t new_size = x->data.v_array.size + y->data.v_array.size;
+      size_t new_size = kegh_length(x) + kegh_length(y);
       kegh_object_t *new_arr = new_kegh_array(new_size);
 
       for (size_t i = 0; i < x->data.v_array.size; i++) {
         kegh_array_set(new_arr, i, kegh_array_get(x, i));
       }
       for (size_t i = 0; i < y->data.v_array.size; i++) {
-        kegh_array_set(new_arr, i + x->data.v_array.size, kegh_array_get(y, i));
+        kegh_array_set(new_arr, i + kegh_length(x), kegh_array_get(y, i));
       }
       return new_arr;
     }
