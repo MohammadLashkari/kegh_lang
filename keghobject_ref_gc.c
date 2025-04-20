@@ -1,4 +1,4 @@
-#include "keghobject.h"
+#include "keghobject_ref_gc.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -91,6 +91,7 @@ kegh_object_t *new_kegh_string(char *v) {
   obj->kind = STRING;
   obj->data.v_string = malloc(strlen(v) + 1);
   if (obj->data.v_string == NULL) {
+    free(obj);
     return NULL;
   }
   strcpy(obj->data.v_string, v);
