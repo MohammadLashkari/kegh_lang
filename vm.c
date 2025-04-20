@@ -3,21 +3,19 @@
 #include "stack.h"
 #include <stdlib.h>
 
-const int INIT_FRAMES = 8;
-const int INIT_OBJECTS = 8;
-const int INIT_REFRENCES = 8;
+const int INIT_SIZE = 8;
 
 vm_t *vm_new() {
   vm_t *vm = malloc(sizeof(vm_t));
   if (vm == NULL) {
     return NULL;
   }
-  vm->frames = stack_new(INIT_FRAMES);
+  vm->frames = stack_new(INIT_SIZE);
   if (vm->frames == NULL) {
     free(vm);
     return NULL;
   }
-  vm->objects = stack_new(INIT_OBJECTS);
+  vm->objects = stack_new(INIT_SIZE);
   if (vm->objects == NULL) {
     stack_free(vm->frames);
     free(vm);
@@ -56,7 +54,7 @@ frame_t *vm_new_frame(vm_t *vm) {
   if (frame == NULL) {
     return NULL;
   }
-  frame->references = stack_new(INIT_REFRENCES);
+  frame->references = stack_new(INIT_SIZE);
   if (frame->references == NULL) {
     free(frame);
     return NULL;
@@ -86,4 +84,96 @@ void frame_free(frame_t *frame) {
   }
   stack_free(frame->references);
   free(frame);
+}
+
+void mark(vm_t *vm) {
+  if (vm == NULL) {
+    return;
+  }
+
+  for (size_t i = 0; i < vm->frames->count; i++) {
+    frame_t *frame = vm->frames->data[i];
+    for (size_t j = 0; j < frame->references->count; j++) {
+      kegh_object_t *obj = frame->references->data[j];
+      obj->is_marked = true;
+    }
+  }
+}
+
+void trace(vm_t *vm) {
+  if (vm == NULL) {
+    return;
+  }
+  stack_t *gray_objects = stack_new(INIT_SIZE);
+  if (gray_objects == NULL) {
+    return;
+  }
+
+  for (size_t i = 0; i < vm->objects->count; i++) {
+    kegh_object_t *obj = vm->objects->data[i];
+    if (obj->is_marked) {
+      stack_push(gray_objects, (void *)obj);
+    }
+  }
+
+  while (gray_objects->count > 0) {
+    trace_blacken_object(gray_objects, stack_pop(gray_objects));
+  }
+
+  stack_free(gray_objects);
+}
+
+void trace_blacken_object(stack_t *gray_objects, kegh_object_t *ref) {
+  if (ref == NULL) {
+    return;
+  }
+  switch (ref->kind) {
+  case INTEGER:
+  case FLOAT:
+  case STRING:
+    break;
+  case VECTOR3:
+    trace_mark_object(gray_objects, ref->data.v_vector3.x);
+    trace_mark_object(gray_objects, ref->data.v_vector3.y);
+    trace_mark_object(gray_objects, ref->data.v_vector3.z);
+    break;
+  case ARRAY:
+    for (size_t i = 0; i < ref->data.v_array.size; i++) {
+      trace_mark_object(gray_objects, ref->data.v_array.elems[i]);
+    }
+    break;
+  }
+}
+
+void trace_mark_object(stack_t *gray_objects, kegh_object_t *ref) {
+  if (ref == NULL || ref->is_marked) {
+    return;
+  }
+  ref->is_marked = true;
+  stack_push(gray_objects, (void *)ref);
+}
+
+void sweep(vm_t *vm) {
+  if (vm == NULL) {
+    return;
+  }
+  for (size_t i = 0; i < vm->objects->count; i++) {
+    kegh_object_t *obj = vm->objects->data[i];
+    if (obj->is_marked) {
+      obj->is_marked = false;
+    } else {
+      kegh_object_free(obj);
+      vm->objects->data[i] = NULL;
+    }
+  }
+  stack_remove_nulls(vm->objects);
+}
+
+void vm_collect_garbage(vm_t *vm) {
+  if (vm == NULL) {
+    return;
+  }
+  mark(vm);
+  trace(vm);
+  sweep(vm);
 }
