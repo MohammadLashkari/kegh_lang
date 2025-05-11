@@ -1,7 +1,7 @@
 #include "keghobject_mas_gc.h"
 #include <stdlib.h>
 
-void snek_object_free(kegh_object_t *obj) {
+void kegh_object_free(kegh_object_t *obj) {
   switch (obj->kind) {
   case INTEGER:
   case FLOAT:

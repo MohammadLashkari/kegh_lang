@@ -1,4 +1,4 @@
-#include "keghobject.h"
+#include "keghobject_ref_gc.h"
 #include <stdio.h>
 
 int main() {
